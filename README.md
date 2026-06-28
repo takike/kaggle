@@ -133,13 +133,19 @@ python src/submit_real.py --data data_real --split test --out submission.csv
 > (hidden test, notebook only); direct CSV upload returns 403. The held‑out numbers
 > above are the honest proxy.
 
-### Next steps to close the gap to LB leaders (~9)
-- **Confidence‑aware correction.** Use the Viterbi path cost / local GR‑match residual
-  to detect weak locks and shrink those toward the trend (per‑point, not global).
-- **LightGBM residual over all 773 cases** (GroupKFold by case): features = GR texture,
-  distance past PS, deviation & path‑cost, `dZ/dMD`, typewell coverage.
-- **Offset wells.** The task notes neighbouring wells share dip; use X/Y/azimuth to
-  borrow structural trend from nearby cases (kriging of `C`).
+### Closing the gap to LB leaders (~9)
+- **LightGBM residual + confidence correction — explored, not adopted.**
+  Built in `src/real_ml.py` (per‑toe‑row residual on relative/confidence features,
+  GroupKFold by case). Honest result: at best **~1% pooled gain while degrading the
+  median case** — no blend weight improves both (see
+  [`experiments/ml_residual_results.md`](experiments/ml_residual_results.md)). On the
+  ~80% well‑aligned cases the residual is near‑zero noise, so a global model hurts
+  good cases faster than it fixes the idiosyncratic tail. The aligner stays as the
+  production prediction.
+- **Offset wells (most promising next).** The task notes neighbouring wells share
+  structural dip; use X/Y to borrow the *toe* dip from nearby wells as a better prior
+  for the aligner (kriging of `C`), rather than extrapolating the heel trend alone —
+  more likely to help the tail than a post‑hoc residual.
 
 ---
 

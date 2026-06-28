@@ -68,8 +68,13 @@ def build_reference(h, tw, known, grid_step=0.5, heel_weight=0.7):
 
 def predict_case(h, tw, stride=15, win_ft=34.0, win_sub=3.0, lam=100.0,
                  e_pad=200.0, c_step=0.5, anchor_ft=120.0, heel_weight=0.7,
-                 shape_norm=False):
-    """Return predicted TVT for every row of h (meaningful on toe rows)."""
+                 shape_norm=False, return_diag=False):
+    """Return predicted TVT for every row of h (meaningful on toe rows).
+
+    If return_diag, also return a dict of per-row diagnostics (deviation, Viterbi
+    path cost = confidence, trend, drift rate, GR match residual) used as features
+    by the LightGBM residual model.
+    """
     known, pred = split_known_pred(h)
     MD = h["MD"].values.astype(float)
     Z = h["Z"].values.astype(float)
@@ -77,7 +82,8 @@ def predict_case(h, tw, stride=15, win_ft=34.0, win_sub=3.0, lam=100.0,
     n = len(h)
     ps = int(np.argmax(pred)) if pred.any() else n
     if ps >= n:
-        return h["TVT_input"].values.copy()
+        out = h["TVT_input"].values.copy()
+        return (out, None) if return_diag else out
 
     grid_ref, ref = build_reference(h, tw, known, heel_weight=heel_weight)
 
@@ -142,10 +148,30 @@ def predict_case(h, tw, stride=15, win_ft=34.0, win_sub=3.0, lam=100.0,
     for ci in range(len(ctrl) - 1, 0, -1):
         path[ci - 1] = back[ci, path[ci]]
     e_ctrl = egrid[path]
+    cost_ctrl = emis[np.arange(len(ctrl)), path]
 
-    C_full = trend + np.interp(MD, MD[ctrl], e_ctrl)
+    e_full = np.interp(MD, MD[ctrl], e_ctrl)
+    C_full = trend + e_full
     tvt_pred = C_full - Z
     # Keep known rows exact.
     out = h["TVT_input"].values.copy()
     out[pred] = tvt_pred[pred]
-    return out
+
+    if not return_diag:
+        return out
+
+    # Per-row confidence = interpolated Viterbi emission cost along the path.
+    cost_full = np.interp(MD, MD[ctrl], np.clip(cost_ctrl, 0, 1e4))
+    # GR match residual at the chosen position (how well GR fits the reference).
+    predgr_row = np.interp(C_full - Z, grid_ref, ref)
+    diag = {
+        "e": e_full,                       # deviation from trend
+        "path_cost": cost_full,            # low = confident lock
+        "trend": trend,
+        "r": np.full(n, r),
+        "gr_match_resid": GR - predgr_row,
+        "dist_past_ps": MD - MD[ps - 1],
+        "ps": ps,
+        "ref_lo": grid_ref[0], "ref_hi": grid_ref[-1],
+    }
+    return out, diag
