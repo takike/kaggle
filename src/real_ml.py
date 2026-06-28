@@ -132,6 +132,26 @@ def oof_eval(df, n_splits=5, train_subsample=2, seed=0):
     }
 
 
+def fit_residual_model(train_dir, cases=None, train_subsample=2, seed=0, **pkw):
+    """Train the residual LGBM on train cases; return (model, feature_cols)."""
+    df = build_dataset(train_dir, cases, **pkw)
+    feat_cols = [c for c in df.columns if not c.startswith("__") and c not in EXCLUDE]
+    X = df[feat_cols].values.astype(np.float32)
+    resid = (df["__true"] - df["__align"]).values
+    m = lgb.LGBMRegressor(random_state=seed, **LGB_PARAMS)
+    m.fit(X[::train_subsample], resid[::train_subsample])
+    return m, feat_cols
+
+
+def predict_residual(model, feat_cols, h, diag):
+    """Per-row residual correction for the toe rows of one case (0 elsewhere)."""
+    f = case_features(h, diag)
+    pred = f["__pred_mask"].values
+    out = np.zeros(len(h))
+    out[pred] = model.predict(f[pred][feat_cols].values.astype(np.float32))
+    return out
+
+
 def per_case_rmse(true, pred, case):
     d = pd.DataFrame({"e2": (true - pred) ** 2, "case": case})
     g = d.groupby("case")["e2"].mean() ** 0.5

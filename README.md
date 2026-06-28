@@ -134,15 +134,18 @@ python src/submit_real.py --data data_real --split test --out submission.csv
 > above are the honest proxy.
 
 ### Closing the gap to LB leaders (~9)
-- **LightGBM residual + confidence correction — explored, not adopted.**
-  Built in `src/real_ml.py` (per‑toe‑row residual on relative/confidence features,
-  GroupKFold by case). Honest result: at best **~1% pooled gain while degrading the
-  median case** — no blend weight improves both (see
-  [`experiments/ml_residual_results.md`](experiments/ml_residual_results.md)). On the
-  ~80% well‑aligned cases the residual is near‑zero noise, so a global model hurts
-  good cases faster than it fixes the idiosyncratic tail. The aligner stays as the
-  production prediction.
-- **Offset wells (most promising next).** The task notes neighbouring wells share
+- **LightGBM residual + confidence correction — small, data‑hungry gain (opt‑in).**
+  `src/real_ml.py` learns a per‑toe‑row residual from relative/confidence features
+  (GroupKFold by case). The benefit depends on training size: with 200 cases any
+  weight hurts the median, but with **all 773 cases a light blend `α≈0.15` improves
+  every metric** — pooled 17.72→17.46, median 7.20→7.03, p90 29.99→29.09 (~1.5%
+  pooled). Heavier weights still hurt. So it's a mild refinement, not a major lever;
+  the aligner does ~95% of the work (43.5→17.7). Enable with
+  `python src/submit_real.py --ml --alpha 0.15`. Details:
+  [`experiments/ml_residual_results.md`](experiments/ml_residual_results.md).
+  (An early version that fed absolute coordinates `Z`/`trend` overfit per‑case depth
+  and hurt everything — restricting to relative/confidence features was essential.)
+- **Offset wells (largest remaining lever).** The task notes neighbouring wells share
   structural dip; use X/Y to borrow the *toe* dip from nearby wells as a better prior
   for the aligner (kriging of `C`), rather than extrapolating the heel trend alone —
   more likely to help the tail than a post‑hoc residual.

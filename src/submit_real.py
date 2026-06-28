@@ -25,15 +25,30 @@ from predict_real import predict_case  # noqa: E402
 
 
 def build_submission(data_dir, split="test", out="submission.csv", verbose=True,
-                     **predict_kw):
+                     ml=False, alpha=0.15, train_split="train", **predict_kw):
     sdir = os.path.join(data_dir, split)
     cases = list_cases(sdir)
+
+    res_model = feat_cols = None
+    if ml:  # opt-in: train the light residual model on the train split
+        from real_ml import fit_residual_model
+        if verbose:
+            print("training residual model on train split ...", flush=True)
+        res_model, feat_cols = fit_residual_model(
+            os.path.join(data_dir, train_split), **predict_kw)
+
     ids, tvts = [], []
     t0 = time.time()
     for k, cid in enumerate(cases):
         h, tw = load_case(sdir, cid)
         known, pred = split_known_pred(h)
-        pr = predict_case(h, tw, **predict_kw)
+        if ml:
+            pr, diag = predict_case(h, tw, return_diag=True, **predict_kw)
+            if diag is not None:
+                from real_ml import predict_residual
+                pr = pr + alpha * predict_residual(res_model, feat_cols, h, diag)
+        else:
+            pr = predict_case(h, tw, **predict_kw)
         pidx = np.where(pred)[0]
         for j in pidx:
             ids.append(f"{cid}_{j}")
@@ -63,8 +78,11 @@ if __name__ == "__main__":
     ap.add_argument("--data", default="data_real")
     ap.add_argument("--split", default="test")
     ap.add_argument("--out", default="submission.csv")
+    ap.add_argument("--ml", action="store_true",
+                    help="add the light LightGBM residual blend (trains on train split)")
+    ap.add_argument("--alpha", type=float, default=0.15)
     args = ap.parse_args()
-    sub = build_submission(args.data, args.split, args.out)
+    sub = build_submission(args.data, args.split, args.out, ml=args.ml, alpha=args.alpha)
     samp = os.path.join(args.data, "sample_submission.csv")
     if os.path.exists(samp):
         merged = align_submission_ids(sub, samp)
