@@ -84,7 +84,70 @@ averaged over 5 seeds (see [`experiments/ablation_results.md`](experiments/ablat
 
 ---
 
-## Run it
+## Real competition data (validated)
+
+The real Kaggle data was later obtained and the solution adapted to its actual
+schema (`src/real_io.py`, `src/predict_real.py`, `src/submit_real.py`). The real
+task is a **predict‑ahead geosteering** problem:
+
+- Each case = `<id>__horizontal_well.csv` (MD, X, Y, Z, GR, `TVT_input`, +train‑only
+  `TVT` & formation tops) and `<id>__typewell.csv` (TVT, GR, Geology).
+- `TVT` is known only up to a **Prediction Start (PS)** point (`TVT_input`, a
+  contiguous "heel"); you predict TVT for the rest of the lateral (the "toe").
+  Metric: pooled RMSE of `true_TVT − pred_TVT` over toe rows.
+- The structural offset **`C = TVT + Z`** varies smoothly along MD (≈ the geologic
+  dip), drifting ~165 ft on average across the toe — so you must *follow* the
+  layers ahead by correlating toe GR to the typewell.
+
+**Algorithm** (`predict_case`): build a reference `GR(TVT)` from the typewell
+(affinely **calibrated to the horizontal GR scale on the heel overlap**) plus the
+heel's own higher‑resolution GR; then a **Viterbi DP whose states are the deviation
+of `C` from the heel's trend line** (so the search is bounded/centred and never
+clips, no matter how far `C` drifts), with windowed absolute‑GR matching as
+emission, `|Δdeviation|` (curvature) as transition cost, and the known heel pinned
+as a hard anchor.
+
+**Held‑out validation** (250 train cases, true TVT known — `experiments/real_results.md`):
+
+| Method | pooled toe‑RMSE |
+|---|---|
+| trend‑only (extrapolate heel dip) | 43.48 |
+| **geosteering aligner** | **19.81** (per‑case median **7.59**) |
+
+Key lessons from the real‑data iteration:
+- **States as deviation‑from‑trend** was the decisive fix: absolute‑`C` states
+  clipped when structure drifted past the grid (one well: RMSE 152 → 62).
+- **Absolute GR matching beats shape‑normalised** here — the heel calibration makes
+  GR levels reliable and informative (shape‑norm pooled 42 vs 19).
+- The pooled score is **tail‑dominated**; a uniform blend toward the trend doesn't
+  help (the trend is worse on the hard cases), so the gap to LB leaders (~9) needs a
+  *confidence‑aware* / learned correction.
+
+```bash
+# Run on the real data (after `kaggle competitions download -c rogii-wellbore-geology-prediction`)
+python experiments/validate_real.py 250          # held-out toe-RMSE
+python src/submit_real.py --data data_real --split test --out submission.csv
+```
+
+> Submission to the live LB is not possible here: ROGII is a **Code Competition**
+> (hidden test, notebook only); direct CSV upload returns 403. The held‑out numbers
+> above are the honest proxy.
+
+### Next steps to close the gap to LB leaders (~9)
+- **Confidence‑aware correction.** Use the Viterbi path cost / local GR‑match residual
+  to detect weak locks and shrink those toward the trend (per‑point, not global).
+- **LightGBM residual over all 773 cases** (GroupKFold by case): features = GR texture,
+  distance past PS, deviation & path‑cost, `dZ/dMD`, typewell coverage.
+- **Offset wells.** The task notes neighbouring wells share dip; use X/Y/azimuth to
+  borrow structural trend from nearby cases (kriging of `C`).
+
+---
+
+## Synthetic development harness
+
+The pieces below were built first, before the real data was available, against a
+physics‑faithful synthetic generator — they capture the same geosteering core and
+remain a fast, dependency‑light way to iterate.
 
 ```bash
 pip install -r requirements.txt
@@ -136,20 +199,27 @@ The pipeline never hard‑codes column names — everything routes through
 
 ```
 src/
-  synth.py      physics-faithful geosteering forward model (synthetic data)
-  align.py      windowed GR<->typewell matching + Viterbi structural smoothing
-  config.py     logical->real column-name mapping (edit this for real data)
-  features.py   trajectory geometry, multi-scale GR texture, alignment confidence
-  pipeline.py   aligner ensemble + LightGBM residual CV + submission
-  make_data.py  write synthetic CSVs in the Kaggle schema
+  # --- real competition data ---
+  real_io.py      load real cases; heel/toe (Prediction Start) split
+  predict_real.py per-case geosteering predictor (deviation-from-trend Viterbi)
+  submit_real.py  build submission.csv in the <caseid>_<rowindex> id format
+  # --- synthetic development harness ---
+  synth.py        physics-faithful geosteering forward model (synthetic data)
+  align.py        windowed GR<->typewell matching + Viterbi structural smoothing
+  config.py       logical->real column-name mapping
+  features.py     trajectory geometry, multi-scale GR texture, alignment confidence
+  pipeline.py     aligner ensemble + LightGBM residual CV + submission (synthetic)
+  make_data.py    write synthetic CSVs in the Kaggle schema
 experiments/
-  run_ablation.py / ablation_results.md
+  validate_real.py / real_results.md      held-out toe-RMSE on real data
+  run_ablation.py  / ablation_results.md   stage ablation on synthetic data
 requirements.txt
 ```
 
-### Note on data access
-This solution was developed in an environment **without Kaggle credentials**, so it
-was built and validated against a synthetic generator that reproduces the competition's
-forward model (typewell GR template -> structural surface -> lateral path -> measured GR
--> TVT). That made genuine trial‑and‑error possible end‑to‑end; plugging in the real
-CSVs is a config edit.
+### Note on development order
+The synthetic harness was built first (the environment initially had no Kaggle
+access) to make genuine end‑to‑end trial‑and‑error possible. The real data was then
+obtained and the solution adapted to its actual schema in `src/real_io.py` /
+`predict_real.py` / `submit_real.py`, and validated on held‑out train cases
+(`experiments/real_results.md`). The synthetic generator reproduces the same
+geosteering forward model and remains the fast iteration loop.

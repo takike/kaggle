@@ -4,3 +4,7 @@ data/
 scratch_*.csv
 submission.csv
 *.ipynb_checkpoints
+
+# real competition data (large, license-restricted)
+data_real/
+submission.csv
