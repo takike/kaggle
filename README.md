@@ -107,12 +107,17 @@ clips, no matter how far `C` drifts), with windowed absolute‑GR matching as
 emission, `|Δdeviation|` (curvature) as transition cost, and the known heel pinned
 as a hard anchor.
 
-**Held‑out validation** (250 train cases, true TVT known — `experiments/real_results.md`):
+**Held‑out validation** (250 train cases, leave‑one‑well‑out, true TVT known):
 
-| Method | pooled toe‑RMSE |
-|---|---|
-| trend‑only (extrapolate heel dip) | 43.48 |
-| **geosteering aligner** | **19.81** (per‑case median **7.59**) |
+| Method | pooled toe‑RMSE | per‑case median |
+|---|---|---|
+| trend‑only (extrapolate heel dip) | 43.48 | — |
+| geosteering aligner (heel‑trend prior) | 20.07 | 6.67 |
+| **aligner + offset‑well dip prior** | **12.59** | **5.16** |
+
+The **offset‑well dip prior** (default) is the single biggest lever — see below and
+[`experiments/offset_results.md`](experiments/offset_results.md). The aligner with the
+plain heel trend lands at ~20; swapping in the neighbour‑borrowed dip drops it to ~12.6.
 
 Key lessons from the real‑data iteration:
 - **States as deviation‑from‑trend** was the decisive fix: absolute‑`C` states
@@ -145,10 +150,17 @@ python src/submit_real.py --data data_real --split test --out submission.csv
   [`experiments/ml_residual_results.md`](experiments/ml_residual_results.md).
   (An early version that fed absolute coordinates `Z`/`trend` overfit per‑case depth
   and hurt everything — restricting to relative/confidence features was essential.)
-- **Offset wells (largest remaining lever).** The task notes neighbouring wells share
-  structural dip; use X/Y to borrow the *toe* dip from nearby wells as a better prior
-  for the aligner (kriging of `C`), rather than extrapolating the heel trend alone —
-  more likely to help the tail than a post‑hoc residual.
+- **Offset‑well dip prior — implemented, the biggest win** (`src/offset.py`). Absolute
+  `C = TVT + Z` is *not* a shared spatial surface (wells sit in different zones/datums,
+  so kNN of `C` is far worse than the heel trend), but the **dip gradient
+  `(∂C/∂X, ∂C/∂Y)` is shared** across neighbours. We regress it from nearby wells with
+  per‑well offset dummies (which absorb the zone/datum differences) and propagate it
+  from the heel anchor along the toe's X/Y path. This replaces the heel‑trend prior and
+  cuts pooled toe‑RMSE **20.1 → 12.6** (median 6.7 → 5.2, worst case 92 → 51). Default
+  on; `--no-offset` to disable. Details: [`experiments/offset_results.md`](experiments/offset_results.md).
+- **Further headroom.** ~12% of wells lack enough neighbours and fall back to the heel
+  trend (larger radius / dip from a spatial model could recover these); the light LGBM
+  residual can then be re‑tuned on top of the stronger prior.
 
 ---
 

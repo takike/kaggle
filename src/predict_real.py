@@ -68,7 +68,7 @@ def build_reference(h, tw, known, grid_step=0.5, heel_weight=0.7):
 
 def predict_case(h, tw, stride=15, win_ft=34.0, win_sub=3.0, lam=100.0,
                  e_pad=200.0, c_step=0.5, anchor_ft=120.0, heel_weight=0.7,
-                 shape_norm=False, return_diag=False):
+                 shape_norm=False, return_diag=False, trend_override=None):
     """Return predicted TVT for every row of h (meaningful on toe rows).
 
     If return_diag, also return a dict of per-row diagnostics (deviation, Viterbi
@@ -99,9 +99,14 @@ def predict_case(h, tw, stride=15, win_ft=34.0, win_sub=3.0, lam=100.0,
         r = 0.0
     r = float(np.clip(r, -0.5, 0.5))
 
-    # States = deviation e of C from the heel trend line (centred, bounded), so
-    # the search never clips no matter how far C drifts.  trend[i] = C_ps + r*dMD.
-    trend = C_ps + r * (MD - MD[ps - 1])
+    # States = deviation e of C from a trend curve (centred, bounded), so the
+    # search never clips no matter how far C drifts.  The trend is either the heel
+    # linear extrapolation (C_ps + r*dMD) or, much better, an offset-well dip prior
+    # supplied via trend_override (see offset.py).
+    if trend_override is not None:
+        trend = np.asarray(trend_override, float)
+    else:
+        trend = C_ps + r * (MD - MD[ps - 1])
     egrid = np.arange(-e_pad, e_pad + c_step, c_step)
     S = len(egrid)
 

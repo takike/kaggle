@@ -25,9 +25,18 @@ from predict_real import predict_case  # noqa: E402
 
 
 def build_submission(data_dir, split="test", out="submission.csv", verbose=True,
-                     ml=False, alpha=0.15, train_split="train", **predict_kw):
+                     ml=False, alpha=0.15, train_split="train",
+                     use_offset=True, **predict_kw):
     sdir = os.path.join(data_dir, split)
     cases = list_cases(sdir)
+
+    # Offset-well dip prior: build a structural cloud from the train split.
+    cloud = None
+    if use_offset:
+        from offset import StructuralCloud, dip_trend
+        if verbose:
+            print("building offset-well structural cloud from train ...", flush=True)
+        cloud = StructuralCloud.from_dir(os.path.join(data_dir, train_split))
 
     res_model = feat_cols = None
     if ml:  # opt-in: train the light residual model on the train split
@@ -42,13 +51,19 @@ def build_submission(data_dir, split="test", out="submission.csv", verbose=True,
     for k, cid in enumerate(cases):
         h, tw = load_case(sdir, cid)
         known, pred = split_known_pred(h)
+        tr = None
+        if cloud is not None:
+            # exclude self when scoring a train-split well (no-op for the real test)
+            excl = (hash(cid) & 0xffffffff) if split == train_split else None
+            tr = dip_trend(h, cloud, exclude_case=excl)
         if ml:
-            pr, diag = predict_case(h, tw, return_diag=True, **predict_kw)
+            pr, diag = predict_case(h, tw, return_diag=True,
+                                    trend_override=tr, **predict_kw)
             if diag is not None:
                 from real_ml import predict_residual
                 pr = pr + alpha * predict_residual(res_model, feat_cols, h, diag)
         else:
-            pr = predict_case(h, tw, **predict_kw)
+            pr = predict_case(h, tw, trend_override=tr, **predict_kw)
         pidx = np.where(pred)[0]
         for j in pidx:
             ids.append(f"{cid}_{j}")
@@ -81,8 +96,11 @@ if __name__ == "__main__":
     ap.add_argument("--ml", action="store_true",
                     help="add the light LightGBM residual blend (trains on train split)")
     ap.add_argument("--alpha", type=float, default=0.15)
+    ap.add_argument("--no-offset", action="store_true",
+                    help="disable the offset-well dip prior (use heel trend only)")
     args = ap.parse_args()
-    sub = build_submission(args.data, args.split, args.out, ml=args.ml, alpha=args.alpha)
+    sub = build_submission(args.data, args.split, args.out, ml=args.ml,
+                           alpha=args.alpha, use_offset=not args.no_offset)
     samp = os.path.join(args.data, "sample_submission.csv")
     if os.path.exists(samp):
         merged = align_submission_ids(sub, samp)
