@@ -44,14 +44,23 @@ class StructuralCloud:
         return cls(np.concatenate(Xs), np.concatenate(Ys),
                    np.concatenate(Cs), np.concatenate(ids))
 
-    def regional_dip(self, cx, cy, exclude_case=None,
+    @staticmethod
+    def _poly_terms(dx, dy, order):
+        """Polynomial basis (no intercept; that is the per-well dummy)."""
+        cols = [dx, dy]
+        if order >= 2:
+            cols += [dx * dx, dy * dy, dx * dy]
+        return np.column_stack(cols)
+
+    def regional_fit(self, cx, cy, exclude_case=None, order=1,
                      radii=(3000.0, 5000.0, 8000.0, 13000.0),
                      min_wells=4, min_pts=50, maxpts=4000):
-        """Shared dip gradient (a, b) around (cx, cy).
+        """Fit the shared structural surface C ~ poly(X-cx, Y-cy) + per-well offset.
 
-        Expands the search radius until enough distinct neighbouring wells are
-        found, so wells in sparser parts of the field still get a dip prior (rather
-        than falling back to the heel trend).  Returns (a, b, R_used) or None.
+        Expands the search radius until enough distinct neighbouring wells are found.
+        The per-well offset dummies absorb each well's zone/datum offset, leaving the
+        shared polynomial coefficients.  ``order=1`` -> planar dip (a,b);
+        ``order=2`` -> + curvature (a,b,c,d,e).  Returns (coefs, order) or None.
         """
         for R in radii:
             idx = np.asarray(self.tree.query_ball_point([cx, cy], R))
@@ -66,16 +75,26 @@ class StructuralCloud:
         if len(idx) > maxpts:
             idx = np.random.default_rng(0).choice(idx, maxpts, replace=False)
         xs, ys, cs, ws = self.X[idx], self.Y[idx], self.C[idx], self.case[idx]
+        P = self._poly_terms(xs - cx, ys - cy, order)
         uw, inv = np.unique(ws, return_inverse=True)
-        D = np.zeros((len(idx), 2 + len(uw)))
-        D[:, 0] = xs - cx; D[:, 1] = ys - cy
-        D[np.arange(len(idx)), 2 + inv] = 1.0
+        D = np.zeros((len(idx), P.shape[1] + len(uw)))
+        D[:, :P.shape[1]] = P
+        D[np.arange(len(idx)), P.shape[1] + inv] = 1.0
         coef, *_ = np.linalg.lstsq(D, cs, rcond=None)
-        return float(coef[0]), float(coef[1]), float(R)
+        return coef[:P.shape[1]], order
+
+    def regional_dip(self, cx, cy, **kw):
+        """Backward-compatible planar dip: returns (a, b) or None."""
+        r = self.regional_fit(cx, cy, order=1, **kw)
+        return (float(r[0][0]), float(r[0][1])) if r is not None else None, float(R)
 
 
-def dip_trend(h, cloud, exclude_case=None, **dip_kw):
-    """Full-length trend array from the offset-well dip prior, or None to fall back."""
+def dip_trend(h, cloud, exclude_case=None, order=1, **dip_kw):
+    """Full-length trend array from the offset-well dip prior, or None to fall back.
+
+    Propagates the shared structural surface from the known heel anchor along the
+    toe's actual X/Y path:  trend(i) = C_PS + [surface(X_i,Y_i) - surface(X_PS,Y_PS)].
+    """
     known, pred = split_known_pred(h)
     if not pred.any():
         return None
@@ -83,8 +102,9 @@ def dip_trend(h, cloud, exclude_case=None, **dip_kw):
     X = h["X"].values; Y = h["Y"].values; Z = h["Z"].values
     C_ps = (h["TVT_input"].values + Z)[ps - 1]
     cx, cy = X[pred].mean(), Y[pred].mean()
-    dip = cloud.regional_dip(cx, cy, exclude_case=exclude_case, **dip_kw)
-    if dip is None:
+    fit = cloud.regional_fit(cx, cy, exclude_case=exclude_case, order=order, **dip_kw)
+    if fit is None:
         return None
-    a, b, _R = dip
-    return C_ps + a * (X - X[ps - 1]) + b * (Y - Y[ps - 1])
+    coef, order = fit
+    surf = lambda px, py: cloud._poly_terms(px - cx, py - cy, order) @ coef  # noqa: E731
+    return C_ps + (surf(X, Y) - surf(X[ps - 1], Y[ps - 1]))
