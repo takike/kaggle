@@ -73,16 +73,25 @@ def case_features(h, diag):
     return f
 
 
-def build_dataset(split_dir, cases=None, verbose=True, **pkw):
+def build_dataset(split_dir, cases=None, verbose=True, cloud=None, **pkw):
+    """Build the per-toe-row feature dataset.
+
+    If `cloud` (a StructuralCloud) is given, the aligner uses the offset-well dip
+    prior, excluding each case from its own dip estimate (leave-one-well-out).
+    """
     cases = cases or list_cases(split_dir)
     feats, groups = [], []
     t0 = time.time()
+    if cloud is not None:
+        from offset import dip_trend
     for k, cid in enumerate(cases):
         h, tw = load_case(split_dir, cid)
         known, pred = split_known_pred(h)
         if pred.sum() < 10:
             continue
-        _, diag = predict_case(h, tw, return_diag=True, **pkw)
+        tr = dip_trend(h, cloud, exclude_case=hash(cid) & 0xffffffff) \
+            if cloud is not None else None
+        _, diag = predict_case(h, tw, return_diag=True, trend_override=tr, **pkw)
         f = case_features(h, diag)
         f = f[f["__pred_mask"]].drop(columns="__pred_mask")
         f["__case"] = cid
@@ -132,9 +141,10 @@ def oof_eval(df, n_splits=5, train_subsample=2, seed=0):
     }
 
 
-def fit_residual_model(train_dir, cases=None, train_subsample=2, seed=0, **pkw):
+def fit_residual_model(train_dir, cases=None, train_subsample=2, seed=0,
+                       cloud=None, **pkw):
     """Train the residual LGBM on train cases; return (model, feature_cols)."""
-    df = build_dataset(train_dir, cases, **pkw)
+    df = build_dataset(train_dir, cases, cloud=cloud, **pkw)
     feat_cols = [c for c in df.columns if not c.startswith("__") and c not in EXCLUDE]
     X = df[feat_cols].values.astype(np.float32)
     resid = (df["__true"] - df["__align"]).values
@@ -160,10 +170,17 @@ def per_case_rmse(true, pred, case):
 
 if __name__ == "__main__":
     ncases = int(sys.argv[1]) if len(sys.argv) > 1 else 0  # 0 = all
+    use_offset = "--offset" in sys.argv
     allc = list_cases("data_real/train")
     cases = allc if ncases == 0 else allc[:ncases]
-    print(f"building features for {len(cases)} cases ...", flush=True)
-    df = build_dataset("data_real/train", cases)
+    cloud = None
+    if use_offset:
+        from offset import StructuralCloud
+        print("building structural cloud ...", flush=True)
+        cloud = StructuralCloud.from_dir("data_real/train")
+    print(f"building features for {len(cases)} cases "
+          f"(offset prior={'on' if cloud else 'off'}) ...", flush=True)
+    df = build_dataset("data_real/train", cases, cloud=cloud)
     print(f"rows: {len(df)}  features: {sum(1 for c in df.columns if not c.startswith('__'))}")
     res = oof_eval(df)
     print(f"\nalignment      pooled toe-RMSE : {res['align_pooled']:.3f}")

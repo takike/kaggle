@@ -158,9 +158,8 @@ python src/submit_real.py --data data_real --split test --out submission.csv
   from the heel anchor along the toe's X/Y path. This replaces the heel‑trend prior and
   cuts pooled toe‑RMSE **20.1 → 12.6** (median 6.7 → 5.2, worst case 92 → 51). Default
   on; `--no-offset` to disable. Details: [`experiments/offset_results.md`](experiments/offset_results.md).
-- **Further headroom.** ~12% of wells lack enough neighbours and fall back to the heel
-  trend (larger radius / dip from a spatial model could recover these); the light LGBM
-  residual can then be re‑tuned on top of the stronger prior.
+  An **adaptive search radius** (3k→5k→8k→13k ft) removes all neighbour fallbacks
+  (was ~12% of wells) for a small extra gain (median 5.16→5.09).
 
 ---
 
