@@ -44,15 +44,24 @@ class StructuralCloud:
         return cls(np.concatenate(Xs), np.concatenate(Ys),
                    np.concatenate(Cs), np.concatenate(ids))
 
-    def regional_dip(self, cx, cy, exclude_case=None, R=3000.0,
+    def regional_dip(self, cx, cy, exclude_case=None,
+                     radii=(3000.0, 5000.0, 8000.0, 13000.0),
                      min_wells=4, min_pts=50, maxpts=4000):
-        """Shared dip gradient (a, b) around (cx, cy), or None if too sparse."""
-        idx = np.asarray(self.tree.query_ball_point([cx, cy], R))
-        if len(idx) == 0:
-            return None
-        if exclude_case is not None:
-            idx = idx[self.case[idx] != exclude_case]
-        if len(idx) < min_pts or len(np.unique(self.case[idx])) < min_wells:
+        """Shared dip gradient (a, b) around (cx, cy).
+
+        Expands the search radius until enough distinct neighbouring wells are
+        found, so wells in sparser parts of the field still get a dip prior (rather
+        than falling back to the heel trend).  Returns (a, b, R_used) or None.
+        """
+        for R in radii:
+            idx = np.asarray(self.tree.query_ball_point([cx, cy], R))
+            if len(idx) == 0:
+                continue
+            if exclude_case is not None:
+                idx = idx[self.case[idx] != exclude_case]
+            if len(idx) >= min_pts and len(np.unique(self.case[idx])) >= min_wells:
+                break
+        else:
             return None
         if len(idx) > maxpts:
             idx = np.random.default_rng(0).choice(idx, maxpts, replace=False)
@@ -62,7 +71,7 @@ class StructuralCloud:
         D[:, 0] = xs - cx; D[:, 1] = ys - cy
         D[np.arange(len(idx)), 2 + inv] = 1.0
         coef, *_ = np.linalg.lstsq(D, cs, rcond=None)
-        return float(coef[0]), float(coef[1])
+        return float(coef[0]), float(coef[1]), float(R)
 
 
 def dip_trend(h, cloud, exclude_case=None, **dip_kw):
@@ -77,5 +86,5 @@ def dip_trend(h, cloud, exclude_case=None, **dip_kw):
     dip = cloud.regional_dip(cx, cy, exclude_case=exclude_case, **dip_kw)
     if dip is None:
         return None
-    a, b = dip
+    a, b, _R = dip
     return C_ps + a * (X - X[ps - 1]) + b * (Y - Y[ps - 1])
