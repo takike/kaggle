@@ -47,8 +47,23 @@ geosteering aligner remains the dominant component (it does ~95% of the work,
 included absolute coordinates (`Z`, `trend`) overfit per-case depth ranges and hurt
 everything; restricting to relative/confidence features was necessary.
 
-The largest remaining lever is **offset wells** (the task notes neighbouring wells
-share structural dip): borrow the *toe* dip from nearby wells via X/Y as a better
-prior for the aligner, rather than extrapolating the heel trend alone.
+## Re-evaluated on top of the offset-well dip prior
 
-Reproduce: `python src/real_ml.py 0`  (full)  or  `python src/real_ml.py 200`.
+Once the much stronger offset-well dip prior is in place (see
+`offset_results.md`), the residual is re-evaluated on the same diagnostics built from
+the dip-prior aligner (250 cases, leave-one-well-out dip, GroupKFold OOF):
+
+| α (ML weight) | pooled toe-RMSE | per-case median |
+|---|---|---|
+| 0.00 (dip aligner only) | 14.09 | 4.94 |
+| 0.15 | 13.63 | 5.06 |
+| **0.30** | **13.28** | 5.41 |
+| 0.50 | 13.01 | 5.64 |
+| 1.00 | 13.37 | 7.09 |
+
+On the dip prior the residual helps **more** than it did on the heel prior: a moderate
+blend `α≈0.3–0.5` cuts pooled RMSE ~6–8% (14.09→13.0–13.3). The median still degrades
+slightly, but since the competition metric is *pooled* RMSE the trade is favourable.
+Default set to **α=0.3** (`submit_real.py --ml`).
+
+Reproduce: `python src/real_ml.py 250 --offset`  (dip prior)  or  without `--offset`.

@@ -139,14 +139,13 @@ python src/submit_real.py --data data_real --split test --out submission.csv
 > above are the honest proxy.
 
 ### Closing the gap to LB leaders (~9)
-- **LightGBM residual + confidence correction — small, data‑hungry gain (opt‑in).**
-  `src/real_ml.py` learns a per‑toe‑row residual from relative/confidence features
-  (GroupKFold by case). The benefit depends on training size: with 200 cases any
-  weight hurts the median, but with **all 773 cases a light blend `α≈0.15` improves
-  every metric** — pooled 17.72→17.46, median 7.20→7.03, p90 29.99→29.09 (~1.5%
-  pooled). Heavier weights still hurt. So it's a mild refinement, not a major lever;
-  the aligner does ~95% of the work (43.5→17.7). Enable with
-  `python src/submit_real.py --ml --alpha 0.15`. Details:
+- **LightGBM residual + confidence correction (opt‑in).** `src/real_ml.py` learns a
+  per‑toe‑row residual from relative/confidence features (GroupKFold by case). On the
+  weak heel prior it was a marginal, data‑hungry gain; **on top of the dip prior it
+  helps more** — a moderate blend `α≈0.3–0.5` cuts pooled toe‑RMSE ~6–8% (14.1→13.0
+  on the 250‑case eval), at a small median cost. Since the LB metric is pooled RMSE
+  the trade is favourable, so the default is `α=0.3`. Enable with
+  `python src/submit_real.py --ml`. Details:
   [`experiments/ml_residual_results.md`](experiments/ml_residual_results.md).
   (An early version that fed absolute coordinates `Z`/`trend` overfit per‑case depth
   and hurt everything — restricting to relative/confidence features was essential.)

@@ -25,7 +25,7 @@ from predict_real import predict_case  # noqa: E402
 
 
 def build_submission(data_dir, split="test", out="submission.csv", verbose=True,
-                     ml=False, alpha=0.15, train_split="train",
+                     ml=False, alpha=0.3, train_split="train",
                      use_offset=True, **predict_kw):
     sdir = os.path.join(data_dir, split)
     cases = list_cases(sdir)
@@ -43,8 +43,9 @@ def build_submission(data_dir, split="test", out="submission.csv", verbose=True,
         from real_ml import fit_residual_model
         if verbose:
             print("training residual model on train split ...", flush=True)
+        # Pass the same cloud so train features use the dip prior too (consistency).
         res_model, feat_cols = fit_residual_model(
-            os.path.join(data_dir, train_split), **predict_kw)
+            os.path.join(data_dir, train_split), cloud=cloud, **predict_kw)
 
     ids, tvts = [], []
     t0 = time.time()
@@ -95,7 +96,7 @@ if __name__ == "__main__":
     ap.add_argument("--out", default="submission.csv")
     ap.add_argument("--ml", action="store_true",
                     help="add the light LightGBM residual blend (trains on train split)")
-    ap.add_argument("--alpha", type=float, default=0.15)
+    ap.add_argument("--alpha", type=float, default=0.3)
     ap.add_argument("--no-offset", action="store_true",
                     help="disable the offset-well dip prior (use heel trend only)")
     args = ap.parse_args()
