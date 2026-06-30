@@ -56,3 +56,21 @@ This is now the **default** prior in `predict_case` (`trend_override`) and
 for the real hidden test the cloud is built from all train wells.
 
 Reproduce: `python experiments/validate_offset.py 150`
+
+## Tuning round — what did NOT help (honest negatives)
+
+After adopting the planar dip prior, two further levers were tested (150 cases,
+leave-one-well-out):
+
+- **Aligner params already optimal.** Sweeping `lam ∈ {40,70,100}` × `e_pad ∈
+  {80,120,160,200}` on the dip prior: `lam=100` is best at every `e_pad`, and `e_pad`
+  is insensitive at `lam=100` (pooled 11.08–11.17). Lower `lam` (looser structure)
+  is consistently worse. Current defaults stand. (`experiments/tune_aligner.py`)
+- **Quadratic dip surface is worse, not better.** `order=2` (add X², Y², XY curvature
+  terms) overfits and *diverges on extrapolation*: the toe extends well beyond the
+  fitted neighbourhood, where a 2nd-order surface blows up, while a plane extrapolates
+  stably. prior-`C` RMSE 28.8 vs 13.2, final pooled 18.97 vs 11.84. Planar `order=1`
+  is the sweet spot. (`experiments/test_quadratic.py`)
+
+Takeaway: the solution is at a stable optimum — planar offset-well dip prior +
+`lam=100` aligner (+ optional `α≈0.3` residual). Added model complexity does not help.
